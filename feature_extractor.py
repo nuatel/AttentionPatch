@@ -1,110 +1,42 @@
-import logging
-import torch
-from dataset import *
-from dataset import *
-from unet import *
-from visualize import *
-from resnet import *
-import torchvision.transforms as T
-from reconstruction import *
+with torch.no_grad():
+    # Forward pass
+    if config.model.feature_extractor == 'vit':
+        #store the output of qkv layer from the last attention layer
+        feat_out = {}
+        def hook_fn_forward_qkv(module, input, output):
+            feat_out["qkv"] = output
+        model._modules["blocks"][-1]._modules["qkv"].register_forward_hook(hook_fn_forward_qkv)
+        # Forward pass in the model
+        attentions = model.get_last_selfattention(img[None, :, :, :,])
+        # Scaling factor: patch_size là số patch cắt tấm ảnh ra
+        scales = [config.patch_size, config.parch_size]
 
-os.environ['CUDA_VISIBLE_DEVICES'] = "0,1,2"
+        # Dimensions
+        nb_im = attentions.shape[0]  # batch size
+        nh = attentions.shape[1] # number of heads
+        nb_tokens = attentions.shape[2] # number of tokens
+        if args.dinoseg:
+            #pred = dino_seg(attentions, (w_featmap, h_featmap), args.patch_size, head=args.dinoseg_head)
+            pred = np.asarray(pred)
+        else:
+            # extract the qkv of the last attentions layer
+            qkv = (
+                feat_out["qkv"]
+                .reshape(nb_im, nb_tokens, 3, nh, -1 // nh)
+                .permute(2, 0, 3, 1, 4)
+            )
+            q, k, v = qkv[0], qkv[1], qkv[2]
+            k = k.transpose(1, 2).reshape(nb_im, nb_tokens, -1)
+            q = q.transpose(1, 2).reshape(nb_im, nb_tokens, -1)
+            v = v.transpose(1, 2).reshape(nb_im, nb_tokens, -1)
 
+            # modality selection
+            if args.which_features == "k"
+                feats = k
+            elif args.which_features == "q":
+                feats = q
+            elif args.which_features == "v":
+                feats = v
 
-def loss_fucntion(a, b, c, d, config):
-    cos_loss = torch.nn.CosineSimilarity()
-    loss1 = 0
-    loss2 = 0
-    loss3 = 0
-    for item in range(len(a)):
-        loss1 += torch.mean(1 - cos_loss(a[item].view(a[item].shape[0], -1), b[item].view(b[item].shape[0], -1)))
-        loss2 += torch.mean(1 - cos_loss(b[item].view(b[item].shape[0], -1),
-                                         c[item].view(c[item].shape[0], -1))) * config.model.DLlambda
-        loss3 += torch.mean(1 - cos_loss(a[item].view(a[item].shape[0], -1),
-                                         d[item].view(d[item].shape[0], -1))) * config.model.DLlambda
-    loss = loss1 + loss2 + loss3
-    return loss
-
-
-def domain_adaptation(unet, config, fine_tune):
-    if config.model.feature_extractor == 'wide_resnet101_2':
-        feature_extractor = wide_resnet101_2(pretrained=True)
-        frozen_feature_extractor = wide_resnet101_2(pretrained=True)
-    elif config.model.feature_extractor == 'wide_resnet50_2':
-        feature_extractor = wide_resnet50_2(pretrained=True)
-        frozen_feature_extractor = wide_resnet50_2(pretrained=True)
-    elif config.model.feature_extractor == 'resnet50':
-        feature_extractor = resnet50(pretrained=True)
-        frozen_feature_extractor = resnet50(pretrained=True)
-    else:
-        logging.warning("Feature extractor is not correctly selected, Default: wide_resnet101_2")
-        feature_extractor = wide_resnet101_2(pretrained=True)
-        frozen_feature_extractor = wide_resnet101_2(pretrained=True)
-
-    feature_extractor.to(config.model.device)
-    frozen_feature_extractor.to(config.model.device)
-
-    frozen_feature_extractor.eval()
-
-    feature_extractor = torch.nn.DataParallel(feature_extractor)
-    frozen_feature_extractor = torch.nn.DataParallel(frozen_feature_extractor)
-
-    train_dataset = Dataset_maker(
-        root=config.data.data_dir,
-        category=config.data.category,
-        config=config,
-        is_train=True,
-    )
-    trainloader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size=config.data.DA_batch_size,
-        shuffle=True,
-        num_workers=config.model.num_workers,
-        drop_last=True,
-    )
-
-    if fine_tune:
-        unet.eval()
-        feature_extractor.train()
-
-        transform = transforms.Compose([
-            transforms.Lambda(lambda t: (t + 1) / (2)),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-        ])
-
-        optimizer = torch.optim.AdamW(feature_extractor.parameters(), lr=1e-4)
-        torch.save(frozen_feature_extractor.state_dict(),
-                   os.path.join(os.path.join(os.getcwd(), config.model.checkpoint_dir), config.data.category, f'feat0'))
-        reconstruction = Reconstruction(unet, config)
-        for epoch in range(config.model.DA_epochs):
-            for step, batch in enumerate(trainloader):
-                half_batch_size = batch[0].shape[0] // 2
-                target = batch[0][:half_batch_size].to(config.model.device)
-                input = batch[0][half_batch_size:].to(config.model.device)
-
-                x0 = reconstruction(input, target, config.model.w_DA)[-1].to(config.model.device)
-                x0 = transform(x0)
-                target = transform(target)
-
-                reconst_fe = feature_extractor(x0)
-                target_fe = feature_extractor(target)
-
-                target_frozen_fe = frozen_feature_extractor(target)
-                reconst_frozen_fe = frozen_feature_extractor(x0)
-
-                loss = loss_fucntion(reconst_fe, target_fe, target_frozen_fe, reconst_frozen_fe, config)
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-
-            print(f"Epoch {epoch + 1} | Loss: {loss.item()}")
-            # if (epoch+1) % 5 == 0:
-            torch.save(feature_extractor.state_dict(),
-                       os.path.join(os.path.join(os.getcwd(), config.model.checkpoint_dir), config.data.category,
-                                    f'feat{epoch + 1}'))
-    else:
-        checkpoint = torch.load(
-            os.path.join(os.path.join(os.getcwd(), config.model.checkpoint_dir), config.data.category,
-                         f'feat{config.model.DA_chp}'))  # {config.model.DA_chp}
-        feature_extractor.load_state_dict(checkpoint)
-    return feature_extractor
+            if args.save_feat_dir is not None:
+                np.save(os.path.join(args.save_feat_dir, im_name.replace('.jpg', '.npy').replace('.jpeg', '.npy').replace('.png', '.npy')), feats.cpu().numpy())

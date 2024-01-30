@@ -1,0 +1,13 @@
+data:
+  name: MVTec #MVtec #VisA #AeBAD
+  data_dir: datasets/MVTec
+  category: screw #
+                  #
+  image_size: 256
+  batch_size: 32
+  test_batch_size: 16
+  mask: True
+
+
+model:
+  feature_extractor: 'vit'
