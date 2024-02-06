@@ -10,4 +10,5 @@ data:
 
 
 model:
-  feature_extractor: 'vit'
+  num_workers: 2
+  pretrained_model: 'vit_tiny'
