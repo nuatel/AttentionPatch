@@ -21,3 +21,4 @@ model:
 
 output:
   embedding_dir_path: './checkpoints/embedding/'
+  anomaly_map_path: './checkpoints/anomaly_map/'
