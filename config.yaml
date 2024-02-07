@@ -1,15 +1,23 @@
 data:
   name: MVTec #MVtec #VisA #AeBAD
   data_dir: datasets/MVTec
-  category: screw #
+  category: leather #
                   #
   image_size: 256
+  input_size: 224
   batch_size: 16
-  test_batch_size: 16
+  test_batch_size: 1
   mask: True
 
 
 model:
+  num_epochs: 1
   num_workers: 2
   pretrained_model: 'vit_base'
   patch_size: 16
+  coreset_sampling_ratio: 0.001
+  n_neighbors: 9
+
+
+output:
+  embedding_dir_path: './checkpoints/embedding/'
