@@ -36,6 +36,12 @@ class Dataset_maker(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         image_file = self.image_files[index]
+
+        image_path_list = image_file.split(os.sep)
+
+        file_name = image_path_list[-1].split('.')[0]
+        x_type = image_path_list[-2]
+
         image = Image.open(image_file)
         image = self.image_transform(image)
         if (image.shape[0] == 1):
@@ -68,7 +74,7 @@ class Dataset_maker(torch.utils.data.Dataset):
                     target = torch.zeros([1, image.shape[-2], image.shape[-1]])
                     label = 'defective'
 
-            return image, target, label
+            return image, target, label, file_name, x_type
 
     def __len__(self):
         return len(self.image_files)
